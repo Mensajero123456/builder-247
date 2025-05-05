@@ -7,6 +7,7 @@ for improved system performance.
 
 import psutil
 import os
+import tempfile
 import logging
 
 logger = logging.getLogger(__name__)
