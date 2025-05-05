@@ -43,20 +43,27 @@ class PerformanceCache:
         """Evict items if cache exceeds size or memory limits."""
         # Evict by age first
         now = time.time()
+        current_time = now
+
+        # Create list of keys to remove based on age
         expired_keys = [
             k for k, v in self._cache.items() 
-            if now - v['timestamp'] > self._max_item_age
+            if current_time - v['timestamp'] > self._max_item_age
         ]
         
+        # Remove items that have expired
         for key in expired_keys:
             del self._cache[key]
             self._cache_metrics['evictions'] += 1
+            self._cache_metrics['current_size'] -= 1
 
-        # If still over max items, remove least recently used
-        if len(self._cache) > self._max_items:
+        # If still over max items, use LRU strategy
+        while len(self._cache) > self._max_items:
+            # Find and remove least recently used item
             lru_key = min(self._cache, key=lambda k: self._cache[k]['timestamp'])
             del self._cache[lru_key]
             self._cache_metrics['evictions'] += 1
+            self._cache_metrics['current_size'] -= 1
 
     def _check_memory_limit(self) -> bool:
         """Check if current memory usage is within limits."""
@@ -81,6 +88,7 @@ class PerformanceCache:
             logger.warning("Memory limit exceeded. Cannot cache item.")
             return False
 
+        # Always call eviction check before setting
         self._evict_if_needed()
 
         # Simple size approximation
@@ -89,6 +97,11 @@ class PerformanceCache:
         if size_estimate > self._max_memory_mb * 1024 * 1024:
             logger.warning(f"Item too large to cache: {size_estimate} bytes")
             return False
+
+        # Remove existing key to reset its access time
+        if key in self._cache:
+            del self._cache[key]
+            self._cache_metrics['current_size'] -= 1
 
         self._cache[key] = {
             'value': value,
@@ -113,7 +126,16 @@ class PerformanceCache:
 
         # Update timestamp for LRU
         item = self._cache[key]
-        item['timestamp'] = time.time()
+        current_time = time.time()
+
+        # Check for item expiration
+        if current_time - item['timestamp'] > self._max_item_age:
+            del self._cache[key]
+            self._cache_metrics['current_size'] -= 1
+            self._cache_metrics['misses'] += 1
+            return None
+
+        item['timestamp'] = current_time
         
         self._cache_metrics['hits'] += 1
         return item['value']
