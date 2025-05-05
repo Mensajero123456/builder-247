@@ -9,6 +9,7 @@ import logging
 import functools
 import psutil
 import sys
+import collections
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class PerformanceCache:
             max_memory_mb (int): Maximum memory usage in megabytes
             max_item_age_seconds (int): Maximum time an item can stay in cache
         """
-        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache = collections.OrderedDict()
         self._max_items = max_items
         self._max_memory_mb = max_memory_mb
         self._max_item_age = max_item_age_seconds
@@ -41,37 +42,28 @@ class PerformanceCache:
 
     def _evict_if_needed(self) -> None:
         """Evict items if cache exceeds size or memory limits."""
-        # Evict by age first
         now = time.time()
-        current_time = now
 
-        # Create list of keys to remove based on age
-        expired_keys = [
-            k for k, v in self._cache.items() 
-            if current_time - v['timestamp'] > self._max_item_age
-        ]
-        
-        # Remove items that have expired
-        for key in expired_keys:
-            del self._cache[key]
-            self._cache_metrics['evictions'] += 1
-            self._cache_metrics['current_size'] -= 1
+        # Remove expired items first
+        for key in list(self._cache.keys()):
+            if now - self._cache[key]['timestamp'] > self._max_item_age:
+                del self._cache[key]
+                self._cache_metrics['evictions'] += 1
+                self._cache_metrics['current_size'] -= 1
 
-        # If still over max items, use LRU strategy
+        # Remove least recently used items beyond max_items
         while len(self._cache) > self._max_items:
-            # Find and remove least recently used item
-            lru_key = min(self._cache, key=lambda k: self._cache[k]['timestamp'])
-            del self._cache[lru_key]
+            self._cache.popitem(last=False)
             self._cache_metrics['evictions'] += 1
             self._cache_metrics['current_size'] -= 1
 
-    def _check_memory_limit(self) -> bool:
+    def _check_memory_limit(self, size_estimate: int) -> bool:
         """Check if current memory usage is within limits."""
         process = psutil.Process()
         mem_info = process.memory_info()
         current_memory_mb = mem_info.rss / (1024 * 1024)
         
-        return current_memory_mb <= self._max_memory_mb
+        return (current_memory_mb + size_estimate / (1024 * 1024)) <= self._max_memory_mb
 
     def set(self, key: str, value: Any) -> bool:
         """
@@ -84,30 +76,32 @@ class PerformanceCache:
         Returns:
             bool: Whether item was successfully cached
         """
-        if not self._check_memory_limit():
-            logger.warning("Memory limit exceeded. Cannot cache item.")
-            return False
-
-        # Always call eviction check before setting
-        self._evict_if_needed()
-
-        # Simple size approximation
-        size_estimate = sys.getsizeof(value)
-        
-        if size_estimate > self._max_memory_mb * 1024 * 1024:
-            logger.warning(f"Item too large to cache: {size_estimate} bytes")
-            return False
-
-        # Remove existing key to reset its access time
+        # Remove existing key to reset its order
         if key in self._cache:
             del self._cache[key]
             self._cache_metrics['current_size'] -= 1
 
+        # Simple size approximation
+        size_estimate = sys.getsizeof(value)
+        
+        if not self._check_memory_limit(size_estimate):
+            logger.warning("Memory limit exceeded. Cannot cache item.")
+            return False
+
+        if size_estimate > self._max_memory_mb * 1024 * 1024:
+            logger.warning(f"Item too large to cache: {size_estimate} bytes")
+            return False
+
+        # Always call eviction before adding new item
+        self._evict_if_needed()
+
+        # Add to end of OrderedDict (most recently used)
         self._cache[key] = {
             'value': value,
             'timestamp': time.time()
         }
         self._cache_metrics['current_size'] += 1
+
         return True
 
     def get(self, key: str) -> Optional[Any]:
@@ -124,21 +118,24 @@ class PerformanceCache:
             self._cache_metrics['misses'] += 1
             return None
 
-        # Update timestamp for LRU
-        item = self._cache[key]
+        # Check for item age
         current_time = time.time()
-
-        # Check for item expiration
-        if current_time - item['timestamp'] > self._max_item_age:
+        if current_time - self._cache[key]['timestamp'] > self._max_item_age:
             del self._cache[key]
             self._cache_metrics['current_size'] -= 1
             self._cache_metrics['misses'] += 1
             return None
 
-        item['timestamp'] = current_time
+        # Move to end (most recently used)
+        value = self._cache[key]['value']
+        del self._cache[key]
+        self._cache[key] = {
+            'value': value,
+            'timestamp': current_time
+        }
         
         self._cache_metrics['hits'] += 1
-        return item['value']
+        return value
 
     def get_metrics(self) -> Dict[str, int]:
         """
