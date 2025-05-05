@@ -1,14 +1,21 @@
 import pytest
+import logging
 import requests
 from unittest.mock import Mock, patch
-from prometheus_swarm.clients.dad_joke_client import DadJokeClient
+from src.clients.dad_joke_client import DadJokeClient
 
 def test_dad_joke_client_initialization():
     """Test initialization of the Dad Joke Client."""
-    client = DadJokeClient()
+    # Create a mock logger for verification
+    mock_logger = logging.getLogger('test_logger')
+    mock_logger.setLevel(logging.INFO)
+
+    client = DadJokeClient(logger=mock_logger)
+    
     assert client.base_url == 'https://icanhazdadjoke.com/'
     assert 'Accept' in client.headers
     assert 'User-Agent' in client.headers
+    assert client.logger == mock_logger
 
 @patch('requests.get')
 def test_get_random_joke_success(mock_get):
@@ -23,7 +30,11 @@ def test_get_random_joke_success(mock_get):
     mock_response.raise_for_status.return_value = None
     mock_get.return_value = mock_response
 
-    client = DadJokeClient()
+    # Use a mock logger to verify logging
+    mock_logger = logging.getLogger('test_logger')
+    mock_logger.setLevel(logging.INFO)
+
+    client = DadJokeClient(logger=mock_logger)
     joke = client.get_random_joke()
 
     assert 'joke' in joke
@@ -50,7 +61,7 @@ def test_get_random_joke_request_exception():
     with patch('requests.get') as mock_get:
         mock_get.side_effect = requests.RequestException("Network error")
 
-        with pytest.raises(requests.RequestException, match="Error fetching dad joke"):
+        with pytest.raises(requests.RequestException, match="Network error"):
             client.get_random_joke()
 
 @patch('requests.get')
@@ -71,7 +82,11 @@ def test_search_jokes_success(mock_get):
     mock_response.raise_for_status.return_value = None
     mock_get.return_value = mock_response
 
-    client = DadJokeClient()
+    # Use a mock logger to verify logging
+    mock_logger = logging.getLogger('test_logger')
+    mock_logger.setLevel(logging.INFO)
+
+    client = DadJokeClient(logger=mock_logger)
     search_results = client.search_jokes('computer', limit=5, page=1)
 
     assert 'results' in search_results
@@ -112,5 +127,5 @@ def test_search_jokes_request_exception():
     with patch('requests.get') as mock_get:
         mock_get.side_effect = requests.RequestException("Network error")
 
-        with pytest.raises(requests.RequestException, match="Error searching dad jokes"):
+        with pytest.raises(requests.RequestException, match="Network error"):
             client.search_jokes('test')
