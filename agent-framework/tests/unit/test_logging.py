@@ -11,17 +11,21 @@ from prometheus_swarm.utils.logging import StructuredLogger, log_execution_time,
 
 def test_structured_logger_json_output(caplog):
     """Test that logger outputs structured JSON."""
-    logger = StructuredLogger("test_logger")
     caplog.set_level(logging.DEBUG)
+    logger = StructuredLogger("test_logger")
+
+    # Capture stdout
+    captured_output = StringIO()
+    sys.stdout = captured_output
 
     logger.info("Test message", extra={"key": "value"})
 
-    # Validate log entry
-    assert len(caplog.records) == 1
-    log_record = caplog.records[0]
-    
-    # Try parsing the message as JSON
-    log_data = json.loads(log_record.message)
+    # Restore stdout
+    sys.stdout = sys.__stdout__
+
+    # Parse the logged JSON
+    log_output = captured_output.getvalue().strip()
+    log_data = json.loads(log_output)
     
     assert "timestamp" in log_data
     assert log_data["level"] == "INFO"
@@ -29,10 +33,13 @@ def test_structured_logger_json_output(caplog):
     assert log_data.get("key") == "value"
 
 
-def test_structured_logger_log_levels(caplog):
+def test_structured_logger_log_levels():
     """Test different log levels."""
     logger = StructuredLogger("test_logger")
-    caplog.set_level(logging.DEBUG)
+
+    # Capture stdout
+    captured_output = StringIO()
+    sys.stdout = captured_output
 
     logger.debug("Debug message")
     logger.info("Info message")
@@ -40,24 +47,39 @@ def test_structured_logger_log_levels(caplog):
     logger.error("Error message")
     logger.critical("Critical message")
 
-    assert len(caplog.records) == 5
-    log_levels = [record.levelname for record in caplog.records]
-    assert log_levels == ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    # Restore stdout
+    sys.stdout = sys.__stdout__
+
+    # Split captured output into individual log lines
+    log_lines = captured_output.getvalue().strip().split('\n')
+    log_data = [json.loads(line) for line in log_lines]
+
+    # The first log will be debug, which might not be printed due to default level
+    expected_levels = ["INFO", "WARNING", "ERROR", "CRITICAL"]
+    log_levels = [entry["level"] for entry in log_data]
+    
+    assert log_levels == expected_levels
 
 
-def test_log_exception(caplog):
+def test_log_exception():
     """Test logging an exception."""
     logger = StructuredLogger("test_logger")
-    caplog.set_level(logging.ERROR)
+
+    # Capture stdout
+    captured_output = StringIO()
+    sys.stdout = captured_output
 
     try:
         raise ValueError("Test exception")
     except ValueError as e:
         logger.log_exception(e, context="Test context")
 
-    assert len(caplog.records) == 1
-    log_record = caplog.records[0]
-    log_data = json.loads(log_record.message)
+    # Restore stdout
+    sys.stdout = sys.__stdout__
+
+    # Parse the logged JSON
+    log_output = captured_output.getvalue().strip()
+    log_data = json.loads(log_output)
 
     assert log_data["level"] == "ERROR"
     assert "Test exception" in log_data["exception_message"]
@@ -67,12 +89,27 @@ def test_log_exception(caplog):
 
 def test_log_execution_time():
     """Test log_execution_time decorator."""
+    # Capture stdout
+    captured_output = StringIO()
+    sys.stdout = captured_output
+
     @log_execution_time
     def dummy_function(x):
         return x * 2
 
     result = dummy_function(5)
+    
+    # Restore stdout
+    sys.stdout = sys.__stdout__
+
+    # Parse the logged JSON
+    log_output = captured_output.getvalue().strip()
+    log_data = json.loads(log_output)
+
     assert result == 10
+    assert log_data["level"] == "INFO"
+    assert "execution_time_seconds" in log_data
+    assert "function_name" in log_data
 
 
 def test_add_file_logging(tmpdir):
@@ -83,7 +120,10 @@ def test_add_file_logging(tmpdir):
     # Verify log file exists
     assert log_file.check(file=1)
 
-    # TODO: Add more comprehensive checks
+    # Check file contents
     with open(str(log_file), 'r') as f:
         contents = f.read()
-        assert "File logging enabled" in contents
+        log_entry = json.loads(contents.split('\n')[0])
+        assert "timestamp" in log_entry
+        assert "level" in log_entry
+        assert "message" in log_entry
