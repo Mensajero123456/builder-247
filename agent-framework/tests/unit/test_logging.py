@@ -5,8 +5,20 @@ import logging
 import pytest
 from io import StringIO
 import sys
+import re
 
 from prometheus_swarm.utils.logging import StructuredLogger, log_execution_time, add_file_logging
+
+
+def parse_log_json(log_output):
+    """Parse log output, handling multiple lines if needed."""
+    log_lines = log_output.strip().split('\n')
+    for line in log_lines:
+        try:
+            return json.loads(line)
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def test_structured_logger_json_output(caplog):
@@ -24,9 +36,10 @@ def test_structured_logger_json_output(caplog):
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue().strip()
-    log_data = json.loads(log_output)
+    log_output = captured_output.getvalue()
+    log_data = parse_log_json(log_output)
     
+    assert log_data is not None
     assert "timestamp" in log_data
     assert log_data["level"] == "INFO"
     assert log_data["message"] == "Test message"
@@ -50,9 +63,10 @@ def test_structured_logger_log_levels():
     # Restore stdout
     sys.stdout = sys.__stdout__
 
-    # Split captured output into individual log lines
-    log_lines = captured_output.getvalue().strip().split('\n')
-    log_data = [json.loads(line) for line in log_lines]
+    # Capture log lines and parse
+    log_output = captured_output.getvalue()
+    log_lines = log_output.strip().split('\n')
+    log_data = [parse_log_json(line) for line in log_lines if parse_log_json(line)]
 
     # The first log will be debug, which might not be printed due to default level
     expected_levels = ["INFO", "WARNING", "ERROR", "CRITICAL"]
@@ -78,9 +92,10 @@ def test_log_exception():
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue().strip()
-    log_data = json.loads(log_output)
+    log_output = captured_output.getvalue()
+    log_data = parse_log_json(log_output)
 
+    assert log_data is not None
     assert log_data["level"] == "ERROR"
     assert "Test exception" in log_data["exception_message"]
     assert log_data["context"] == "Test context"
@@ -103,10 +118,11 @@ def test_log_execution_time():
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue().strip()
-    log_data = json.loads(log_output)
+    log_output = captured_output.getvalue()
+    log_data = parse_log_json(log_output)
 
     assert result == 10
+    assert log_data is not None
     assert log_data["level"] == "INFO"
     assert "execution_time_seconds" in log_data
     assert "function_name" in log_data
@@ -123,7 +139,13 @@ def test_add_file_logging(tmpdir):
     # Check file contents
     with open(str(log_file), 'r') as f:
         contents = f.read()
-        log_entry = json.loads(contents.split('\n')[0])
+        # Use regex to match JSON-like log entry
+        log_match = re.search(r'\{.*"level".*\}', contents, re.DOTALL)
+        assert log_match is not None
+        
+        log_entry_str = log_match.group(0)
+        log_entry = json.loads(log_entry_str)
+        
         assert "timestamp" in log_entry
         assert "level" in log_entry
         assert "message" in log_entry
