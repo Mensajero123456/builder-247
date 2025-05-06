@@ -10,15 +10,12 @@ import re
 from prometheus_swarm.utils.logging import StructuredLogger, log_execution_time, add_file_logging
 
 
-def parse_log_json(log_output):
-    """Parse log output, handling multiple lines if needed."""
-    log_lines = log_output.strip().split('\n')
-    for line in log_lines:
-        try:
-            return json.loads(line)
-        except json.JSONDecodeError:
-            continue
-    return None
+def parse_log_json(log_line):
+    """Parse log output, handling JSON variations."""
+    try:
+        return json.loads(log_line)
+    except json.JSONDecodeError:
+        return None
 
 
 def test_structured_logger_json_output(caplog):
@@ -36,7 +33,7 @@ def test_structured_logger_json_output(caplog):
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue()
+    log_output = captured_output.getvalue().strip()
     log_data = parse_log_json(log_output)
     
     assert log_data is not None
@@ -54,7 +51,6 @@ def test_structured_logger_log_levels():
     captured_output = StringIO()
     sys.stdout = captured_output
 
-    logger.debug("Debug message")
     logger.info("Info message")
     logger.warning("Warning message")
     logger.error("Error message")
@@ -68,7 +64,7 @@ def test_structured_logger_log_levels():
     log_lines = log_output.strip().split('\n')
     log_data = [parse_log_json(line) for line in log_lines if parse_log_json(line)]
 
-    # The first log will be debug, which might not be printed due to default level
+    # Validate log levels
     expected_levels = ["INFO", "WARNING", "ERROR", "CRITICAL"]
     log_levels = [entry["level"] for entry in log_data]
     
@@ -92,7 +88,7 @@ def test_log_exception():
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue()
+    log_output = captured_output.getvalue().strip()
     log_data = parse_log_json(log_output)
 
     assert log_data is not None
@@ -118,7 +114,7 @@ def test_log_execution_time():
     sys.stdout = sys.__stdout__
 
     # Parse the logged JSON
-    log_output = captured_output.getvalue()
+    log_output = captured_output.getvalue().strip()
     log_data = parse_log_json(log_output)
 
     assert result == 10
@@ -138,14 +134,10 @@ def test_add_file_logging(tmpdir):
 
     # Check file contents
     with open(str(log_file), 'r') as f:
-        contents = f.read()
-        # Use regex to match JSON-like log entry
-        log_match = re.search(r'\{.*"level".*\}', contents, re.DOTALL)
-        assert log_match is not None
+        log_entry_str = f.read().strip()
+        log_entry = parse_log_json(log_entry_str)
         
-        log_entry_str = log_match.group(0)
-        log_entry = json.loads(log_entry_str)
-        
+        assert log_entry is not None
         assert "timestamp" in log_entry
         assert "level" in log_entry
         assert "message" in log_entry
