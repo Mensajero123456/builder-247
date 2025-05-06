@@ -14,6 +14,29 @@ from colorama import init, Fore, Style
 # Initialize colorama for cross-platform color support
 init(strip=False)  # Force color output even when not in a terminal
 
+
+class JsonFormatter(logging.Formatter):
+    """Custom JSON log formatter."""
+
+    def format(self, record):
+        """Convert log record to JSON."""
+        log_data = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+
+        # Include extra attributes
+        if hasattr(record, 'extra'):
+            log_data.update(record.extra)
+
+        # Include exception information
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+
+        return json.dumps(log_data, default=str)
+
+
 class StructuredLogger:
     """Enhanced logger with structured logging support."""
 
@@ -36,59 +59,28 @@ class StructuredLogger:
             self.logger.removeHandler(handler)
 
         console_handler = logging.StreamHandler(sys.stdout)
-        console_formatter = logging.Formatter('%(message)s')
-        console_handler.setFormatter(console_formatter)
+        console_handler.setFormatter(JsonFormatter())
         self.logger.addHandler(console_handler)
-
-    def _log_structured(
-        self,
-        level: int,
-        message: str,
-        extra: Optional[Dict[str, Any]] = None
-    ):
-        """
-        Log a structured message.
-
-        Args:
-            level: Logging level
-            message: Log message
-            extra: Additional context
-        """
-        extra = extra or {}
-        log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": logging.getLevelName(level),
-            "message": message,
-            **extra
-        }
-
-        # Log to console in JSON
-        try:
-            console_message = json.dumps(log_entry, default=str)
-            self.logger.log(level, console_message)
-        except (TypeError, ValueError):
-            # Fallback if JSON serialization fails
-            self.logger.log(level, message)
 
     def debug(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log a debug message."""
-        self._log_structured(logging.DEBUG, message, extra)
+        self.logger.debug(message, extra={'extra': extra or {}})
 
     def info(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log an info message."""
-        self._log_structured(logging.INFO, message, extra)
+        self.logger.info(message, extra={'extra': extra or {}})
 
     def warning(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log a warning message."""
-        self._log_structured(logging.WARNING, message, extra)
+        self.logger.warning(message, extra={'extra': extra or {}})
 
     def error(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log an error message."""
-        self._log_structured(logging.ERROR, message, extra)
+        self.logger.error(message, extra={'extra': extra or {}})
 
     def critical(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log a critical message."""
-        self._log_structured(logging.CRITICAL, message, extra)
+        self.logger.critical(message, extra={'extra': extra or {}})
 
     def log_exception(
         self,
@@ -109,13 +101,14 @@ class StructuredLogger:
             "exception_type": type(exception).__name__,
             "exception_message": str(exception),
             "traceback": traceback.format_exc(),
-            "context": context
+            "context": context,
+            **extra
         }
-        error_details.update(extra)
 
-        self.error(
+        self.logger.error(
             f"Exception occurred{f': {context}' if context else ''}",
-            extra=error_details
+            extra={'extra': error_details},
+            exc_info=exception
         )
 
 
@@ -185,17 +178,14 @@ def add_file_logging(
             log_file, maxBytes=max_bytes, backupCount=backup_count
         )
         file_handler.setLevel(log_level)
-        file_formatter = logging.Formatter(
-            '%(message)s'
-        )
-        file_handler.setFormatter(file_formatter)
+        file_handler.setFormatter(JsonFormatter())
         logger.logger.addHandler(file_handler)
         logger.info(
             "File logging enabled", 
-            extra={"log_file": log_file}
+            extra={"log_file": str(log_file)}
         )
     except Exception as e:
         logger.error(
             "Failed to set up file logging",
-            extra={"log_file": log_file, "error": str(e)}
+            extra={"log_file": str(log_file), "error": str(e)}
         )
