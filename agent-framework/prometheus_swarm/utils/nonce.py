@@ -60,13 +60,21 @@ class NonceGenerator:
         
         Returns:
             bool: True if nonce is valid, False otherwise.
+        
+        Raises:
+            TypeError: If nonce is not a string or not a valid hash.
         """
         try:
-            # Attempt to decode timestamp from end of nonce
-            nonce_timestamp = float(int(nonce, 16) / (2**256 - 1))
-            current_time = time.time()
+            # Validate nonce format
+            if not isinstance(nonce, str) or len(nonce) != 64:
+                return False
             
-            # Check if nonce is within allowed time window
-            return (current_time - nonce_timestamp) <= max_age_seconds
+            # Interpret the first part of the hex hash as a timestamp
+            timestamp_hex = nonce[:16]
+            nonce_timestamp = int(timestamp_hex, 16)
+            
+            current_time = int(time.time())
+            return abs(current_time - nonce_timestamp) <= max_age_seconds
+        
         except (ValueError, TypeError):
             return False
