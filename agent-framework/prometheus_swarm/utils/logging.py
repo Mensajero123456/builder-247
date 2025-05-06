@@ -6,8 +6,8 @@ import traceback
 import json
 from typing import Any, Dict, Optional
 from functools import wraps
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime
 
 from colorama import init, Fore, Style
 
@@ -36,7 +36,8 @@ class StructuredLogger:
             self.logger.removeHandler(handler)
 
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(logging.Formatter('%(message)s'))
+        console_formatter = logging.Formatter('%(message)s')
+        console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
 
     def _log_structured(
@@ -55,7 +56,7 @@ class StructuredLogger:
         """
         extra = extra or {}
         log_entry = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": logging.getLevelName(level),
             "message": message,
             **extra
@@ -64,11 +65,10 @@ class StructuredLogger:
         # Log to console in JSON
         try:
             console_message = json.dumps(log_entry, default=str)
+            self.logger.log(level, console_message)
         except (TypeError, ValueError):
             # Fallback if JSON serialization fails
-            console_message = f"{message} (Unserializable extra data)"
-
-        self.logger.log(level, console_message, extra={"structured_log": log_entry})
+            self.logger.log(level, message)
 
     def debug(self, message: str, extra: Optional[Dict[str, Any]] = None):
         """Log a debug message."""
@@ -132,12 +132,12 @@ def log_execution_time(func):
     """
     @wraps(func)
     def wrapper(*args, **kwargs):
-        start_time = datetime.now()
+        start_time = datetime.now(timezone.utc)
         try:
             result = func(*args, **kwargs)
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             logger.info(
-                f"Function executed",
+                "Function executed",
                 extra={
                     "function_name": func.__name__,
                     "execution_time_seconds": duration
@@ -145,9 +145,9 @@ def log_execution_time(func):
             )
             return result
         except Exception as e:
-            duration = (datetime.now() - start_time).total_seconds()
+            duration = (datetime.now(timezone.utc) - start_time).total_seconds()
             logger.error(
-                f"Function execution failed",
+                "Function execution failed",
                 extra={
                     "function_name": func.__name__,
                     "execution_time_seconds": duration,
@@ -186,13 +186,16 @@ def add_file_logging(
         )
         file_handler.setLevel(log_level)
         file_formatter = logging.Formatter(
-            '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "message": "%(message)s"}'
+            '%(message)s'
         )
         file_handler.setFormatter(file_formatter)
         logger.logger.addHandler(file_handler)
-        logger.info(f"File logging enabled: {log_file}")
+        logger.info(
+            "File logging enabled", 
+            extra={"log_file": log_file}
+        )
     except Exception as e:
         logger.error(
-            f"Failed to set up file logging",
+            "Failed to set up file logging",
             extra={"log_file": log_file, "error": str(e)}
         )
