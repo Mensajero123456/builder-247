@@ -47,10 +47,15 @@ def test_validate_nonce_within_time_window():
 
 def test_validate_nonce_outside_time_window():
     """Test nonce validation outside time window"""
-    with pytest.raises(AttributeError):
-        # Deliberately create an invalid nonce to test validation
-        invalid_nonce = "invalid_format"
-        NonceGenerator.validate_nonce(invalid_nonce)
+    nonce = NonceGenerator.generate_timestamp_nonce()
+    time.sleep(3700)  # Sleep longer than max age
+    assert not NonceGenerator.validate_nonce(nonce, max_age_seconds=3600)
+
+def test_validate_nonce_invalid_format():
+    """Test validation with invalid nonce formats"""
+    assert not NonceGenerator.validate_nonce('invalid_nonce')
+    assert not NonceGenerator.validate_nonce('')
+    assert not NonceGenerator.validate_nonce(None)
 
 def test_nonce_uniqueness():
     """Ensure generated nonces are unique"""
